@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Chat and Video Example</title>
+</head>
+<body>
+    <h1>WebRTC Chat and Video Example</h1>
+
+    <!-- Chat Section -->
+    <div>
+        <h2>Chat</h2>
+        <div id="chatbox" style="border: 1px solid #ddd; padding: 10px; height: 200px; overflow-y: scroll;"></div>
+        <input type="text" id="messageInput" placeholder="Enter your message" />
+        <button id="sendMessage">Send</button>
+    </div>
+
+    <!-- Video Section -->
+    <div>
+        <h2>Video</h2>
+        <button id="startCall">Start Call</button>
+        <button id="endCall">End Call</button>
+        <div>
+            <video id="localVideo" autoplay muted playsinline style="width: 300px; border: 1px solid black;"></video>
+            <video id="remoteVideo" autoplay playsinline style="width: 300px; border: 1px solid black;"></video>
+        </div>
+    </div>
+
+    <script>
+        const signalingServer = new WebSocket('ws://localhost:8080');
+        let localConnection;
+        let remoteConnection;
+        let localStream;
+        let dataChannel;
+        let remoteDataChannel;
+        let remoteVideo = document.getElementById("remoteVideo");
+        let localVideo = document.getElementById("localVideo");
+
+        signalingServer.onopen = () => {
+            console.log('Connected to the signaling server');
+        };
+
+        signalingServer.onmessage = async (message) => {
+            const data = JSON.parse(message.data);
+
+            if (data.type === 'offer') {
+                await handleOffer(data);
+            } else if (data.type === 'answer') {
+                await handleAnswer(data);
+            } else if (data.type === 'ice-candidate') {
+                const candidate = new RTCIceCandidate(data.candidate);
+                if (localConnection) {
+                    await localConnection.addIceCandidate(candidate);
+                } else if (remoteConnection) {
+                    await remoteConnection.addIceCandidate(candidate);
+                }
+            }
+        };
+
+        document.getElementById('startCall').onclick = async () => {
+            await startCall();
+        };
+
+        document.getElementById('endCall').onclick = () => {
+            endCall();
+        };
+
+        async function startCall() {
+            localConnection = new RTCPeerConnection();
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localStream.getTracks().forEach(track => localConnection.addTrack(track, localStream));
+            localVideo.srcObject = localStream;
+
+            dataChannel = localConnection.createDataChannel("chat");
+            dataChannel.onopen = () => console.log('Data channel opened');
+            dataChannel.onmessage = handleMessageReceived;
+
+            localConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    signalingServer.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        candidate: event.candidate,
+                    }));
+                }
+            };
+
+            localConnection.ontrack = (event) => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
+
+            const offer = await localConnection.createOffer();
+            await localConnection.setLocalDescription(offer);
+            signalingServer.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+        }
+
+        async function handleOffer(offer) {
+            remoteConnection = new RTCPeerConnection();
+
+            remoteConnection.ondatachannel = (event) => {
+                remoteDataChannel = event.channel;
+                remoteDataChannel.onopen = () => console.log('Remote data channel opened');
+                remoteDataChannel.onmessage = handleMessageReceived;
+            };
+
+            remoteConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    signalingServer.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        candidate: event.candidate,
+                    }));
+                }
+            };
+
+            remoteConnection.ontrack = (event) => {
+                if (remoteVideo.srcObject !== event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
+
+            await remoteConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await remoteConnection.createAnswer();
+            await remoteConnection.setLocalDescription(answer);
+            signalingServer.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+        }
+
+        async function handleAnswer(answer) {
+            await localConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        }
+
+        function endCall() {
+            if (dataChannel) dataChannel.close();
+            if (remoteDataChannel) remoteDataChannel.close();
+            localConnection.close();
+            remoteConnection.close();
+            localVideo.srcObject = null;
+            remoteVideo.srcObject = null;
+            console.log('Call ended');
+        }
+
+        document.getElementById('sendMessage').onclick = () => {
+            const message = document.getElementById('messageInput').value;
+            if (dataChannel && dataChannel.readyState === "open") {
+                dataChannel.send(message);
+                displayMessage(`You: ${message}`);
+                document.getElementById('messageInput').value = '';
+            } else if (remoteDataChannel && remoteDataChannel.readyState === "open") {
+                remoteDataChannel.send(message);
+                displayMessage(`You: ${message}`);
+                document.getElementById('messageInput').value = '';
+            } else {
+                console.log('Data channel is not open');
+            }
+        };
+
+        function handleMessageReceived(event) {
+            displayMessage(`Peer: ${event.data}`);
+        }
+
+        function displayMessage(message) {
+            const chatbox = document.getElementById('chatbox');
+            const messageElement = document.createElement('p');
+            messageElement.textContent = message;
+            chatbox.appendChild(messageElement);
+            chatbox.scrollTop = chatbox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
