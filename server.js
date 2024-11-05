@@ -1,46 +1,36 @@
-// Import libraries
-const express = require('express');
-// const http = require('http');
-const WebSocket = require('ws');
-const path = require('path');
+const WebSocket = require("ws");
 
-// Setup Express and HTTP server
-// const app = express();
-// const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const WS_PORT = process.env.WS_PORT || 8888;
 
-// // Serve the static HTML file (for the client)
-// app.use(express.static(path.join(__dirname, 'public')));
-
-// // Route to serve index.html for the root path
-// app.get('/', (req, res) => {
-//     res.sendFile(path.join(__dirname, 'public', 'index.html'));
-// });
-
-// WebSocket connection event
-wss.on('connection', (ws) => {
-    console.log('New client connected');
-
-    // Handle incoming messages
-    ws.on('message', (message) => {
-        console.log('Received:', message);
-
-        // Broadcast the message to other connected clients
-        wss.clients.forEach((client) => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message);
-            }
-        });
-    });
-
-    // Handle client disconnect
-    ws.on('close', () => {
-        console.log('Client disconnected');
-    });
+// สร้าง WebSocket server ที่ใช้พอร์ต WS_PORT
+const wsServer = new WebSocket.Server({ port: WS_PORT }, () => {
+  console.log(`WS server is listening at ws://localhost:${WS_PORT}`);
 });
 
-// Start server on port 8080
-const PORT = 10000;
-server.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+// array ของ clients ที่เชื่อมต่อ
+let connectedClients = [];
+
+wsServer.on("connection", (ws) => {
+  console.log("New client connected");
+
+  // เพิ่ม client ใหม่ใน array
+  connectedClients.push(ws);
+
+  // รับและส่งข้อความ signaling data สำหรับ WebRTC
+  ws.on("message", (data) => {
+    const message = JSON.parse(data);
+
+    // ส่งข้อมูลให้ client อื่นที่เชื่อมต่ออยู่
+    connectedClients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
+      }
+    });
+  });
+
+  // เมื่อ client ตัดการเชื่อมต่อให้นำออกจาก list
+  ws.on("close", () => {
+    connectedClients = connectedClients.filter(client => client !== ws);
+    console.log("Client disconnected");
+  });
 });
