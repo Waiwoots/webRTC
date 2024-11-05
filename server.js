@@ -1,6 +1,6 @@
 const WebSocket = require("ws");
 
-const WS_PORT = process.env.WS_PORT || 8888;
+const WS_PORT = process.env.WS_PORT || 10000;
 
 // สร้าง WebSocket server ที่ใช้พอร์ต WS_PORT
 const wsServer = new WebSocket.Server({ port: WS_PORT }, () => {
